@@ -16,10 +16,12 @@ GOODS = ["food"]
 MAX_COST = 2.0
 MAX_REDEMPTION = 2.0
 
-TURNS = 6
+TURNS = 12
 MAX_ACTS = 10000
 
-#INITIAL_MONEY = 10.0
+INITIAL_MONEY = 10.0
+
+prices = {}
 
 
 class Agent(object):
@@ -27,7 +29,7 @@ class Agent(object):
         self.goods = goods
         self.max_value = max_value
         self.values = dict((name, uniform(0, max_value)) for name in goods)
-#        self.money = INITIAL_MONEY
+        self.money = INITIAL_MONEY
 
 
 class Seller(Agent):
@@ -41,10 +43,9 @@ class Buyer(Agent):
     def act(self, book):
         good = choice(self.goods)
         offer = uniform(self.values[good], self.max_value)
-#        if offer <= self.money:
-        return book.bid(self, good, offer)
-        # if bankrupt, can't trade again
-        return [self]
+        if offer <= self.money:
+            return book.bid(self, good, offer)
+        return []
 
 
 class Book(object):
@@ -76,10 +77,10 @@ class Book(object):
 
         seller = self.max_askers[good]
         buyer = self.max_bidders[good]
-#        assert buyer.money >= price
+        assert buyer.money >= price
 
-#        buyer.money -= price
-#        seller.money += price
+        buyer.money -= price
+        seller.money += price
 
         del self.max_asks[good]
         del self.max_askers[good]
