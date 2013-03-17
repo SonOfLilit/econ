@@ -13,6 +13,10 @@ GOODS = ["food"]
 MAX_COST = 2.0
 MAX_REDEMPTION = 2.0
 
+MAX_LEARNING = 0.1
+MIN_MOMENTUM = 0.1
+MAX_MOMENTUM = MIN_MOMENTUM + 0.3
+
 TURNS = 6
 MAX_ACTS = 10000
 
@@ -25,8 +29,11 @@ class Agent(object):
     def __init__(self, goods, max_value):
         self.goods = goods
         self.max_value = max_value
-        self.values = dict((name, uniform(0, max_value)) for name in goods)
+        self.values = self.uniform_parameter(0, max_value)
         self.money = INITIAL_MONEY
+
+    def uniform_parameter(self, a, b):
+        return dict((name, uniform(a, b)) for name in self.goods)
 
 
 class Seller(Agent):
@@ -44,6 +51,14 @@ class Buyer(Agent):
             return book.bid(self, good, offer)
         return []
 
+
+class AgentPlus(Agent):
+    def __init__(self, goods, max_value):
+        Agent.__init__(self, goods, max_value)
+        self.learning_coefficient = self.uniform_parameter(0, MAX_LEARNING)
+        self.momentum_coefficient = \
+            self.uniform_parameter(MIN_MOMENTUM, MAX_MOMENTUM)
+        self.initial_markup = 1 # TODO
 
 class Book(object):
     def __init__(self, goods):
