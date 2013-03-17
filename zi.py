@@ -8,15 +8,12 @@ http://users.isy.liu.se/rt/johda87/publications/Dahlin2011-ABM.pdf.
 
 from random import uniform, choice, sample
 
-NUM_SELLERS = 50
-NUM_BUYERS = 100
-
 GOODS = ["food"]
 
 MAX_COST = 2.0
 MAX_REDEMPTION = 2.0
 
-TURNS = 12
+TURNS = 6
 MAX_ACTS = 10000
 
 INITIAL_MONEY = 10.0
@@ -91,6 +88,9 @@ class Book(object):
 
 
 def run(num_sellers, num_buyers):
+    global prices
+    prices = {"food": []}
+
     sellers = set(Seller(GOODS, MAX_COST) for _ in xrange(num_sellers))
     buyers = set(Buyer(GOODS, MAX_REDEMPTION) for _ in xrange(num_buyers))
 
@@ -107,19 +107,51 @@ def run(num_sellers, num_buyers):
             for agent_to_remove in agent.act(book):
                 available.remove(agent_to_remove)
 
+    return sellers, buyers
+
+
 import matplotlib.pyplot as plt
 import numpy
 
 
 def run_graphically(num_sellers, num_buyers):
-    global prices
-    prices = {"food": []}
-    run(num_sellers, num_buyers)
+    sellers, buyers = run(num_sellers, num_buyers)
+
     plot = numpy.array(prices["food"])
+
+    plt.figure(1)
+    plt.subplot(131)
     plt.plot(plot)
-    print numpy.average(plot), numpy.std(plot)
+
+    plt.subplot(132)
+    sellers = numpy.array([s.values["food"] for s in sellers])
+    sellers.sort()
+    plt.plot(sellers)
+    buyers = numpy.array([b.values["food"] for b in buyers])
+    buyers.sort()
+    buyers = buyers[::-1]
+    plt.plot(buyers)
+    theoretical = sellers[(buyers < sellers).nonzero()[0][0]]
+    average = numpy.average(plot)
+    std = numpy.std(plot)
+
+    ones = numpy.ones_like(sellers)
+    plt.plot(ones * (average - std), 'r--')
+    plt.plot(ones * average, 'r--')
+    plt.plot(ones * (average + std), 'r--')
+    plt.plot(ones * theoretical, 'b--')
+
+    indices = numpy.arange(1, TURNS) * int(1 + len(plot) / TURNS)
+    plots = numpy.split(plot, indices)
+    rmse = [numpy.sqrt(numpy.sum((p - theoretical) ** 2) / len(p))
+            for p in plots]
+
+    plt.subplot(133)
+    plt.axis([0, 5, 0, 1])
+    plt.plot(rmse)
+
     plt.show()
 
 run_graphically(50, 50)
-run_graphically(50, 100)
-run_graphically(100, 50)
+#run_graphically(50, 100)
+#run_graphically(100, 50)
