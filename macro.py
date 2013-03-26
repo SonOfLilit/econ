@@ -1,5 +1,7 @@
 import numpy
 
+MAX_ROUNDS = 1000
+
 NUM_PRICE_SIMULATIONS = 7
 NUM_TRADE_ROUNDS = 3
 
@@ -24,14 +26,14 @@ HIGH_DEMAND_PRICE_FACTOR = 5
 FOOD_DEMAND = numpy.zeros(len(GOODS))
 FOOD_DEMAND[FOOD] += 1.0
 
-PRICES = INITIAL_PRICES
-
 
 class Agent(object):
-    def __init__(self):
+    def __init__(self, market):
         # this is the kind of thing programmers die a slow death
         # for... but it's the fault of the numpy API, not me
         self.profits = numpy.vectorize(self.profit)
+
+        self.market = market
 
         self.magic = 30.0
         self.magic_regeneration = 10.0
@@ -65,8 +67,8 @@ class Agent(object):
             self_supplied_food = min(produced_amount, formula[FOOD])
             produced_amount -= self_supplied_food
             formula[FOOD] -= self_supplied_food
-        cost = magic_cost + PRICES.dot(formula) - self.magic_regeneration
-        produced_value = PRICES[good] * produced_amount
+        cost = magic_cost + market.prices.dot(formula) - self.magic_regeneration
+        produced_value = market.prices[good] * produced_amount
         return cost, produced_value
 
     def get_demand(self):
@@ -76,32 +78,41 @@ class Agent(object):
         return COSTS_ONLY_MONEY
 
     def get_supply(self):
+        good = requested_price = amount = None
         if self.todays_spell is not None:
             amount, good, _magic_cost, _formula = SPELLS[self.todays_spell]
             cost, _value = self.cost_value_analysis(self.todays_spell)
-            requested_price = max(MINIMUM_PROFIT, MINIMUM_PROFIT_COST_RATIO * cost)
-            return good, requested_price, amount
-        return None, None, None
+            requested_price = max(MINIMUM_PROFIT,
+                                  MINIMUM_PROFIT_COST_RATIO * cost)
+        return good, requested_price, amount
 
 
 class Market(object):
-    def __init__(self, agents):
-        self.agents = agents
+    def __init__(self, num_agents):
+        self.agents = [Agent(self) for _i in xrange(num_agents)]
+        self.prices = numpy.array(INITIAL_PRICES)
+
+        self.iteration = -1
+        self.history = History(num_agents)
+
 
     def day(self):
         for agent in self.agents:
             agent.sleep()
         for _i in xrange(NUM_PRICE_SIMULATIONS):
             self.choose_prices()
-            print "***", PRICES
+            print "***", self.prices
+        supplies, demands, prices = [], [], []
+        # TODO: record all above
         for _i in xrange(NUM_TRADE_ROUNDS):
             self.choose_prices()
             self.trade()
-            print "*", PRICES
+            print "*", self.prices
+        
+        self.iteration += 1
+        self.history.record_skills(self.iteration, self.agents)
 
     def choose_prices(self):
-        global PRICES
-
         demand_met_by_supply = True
 
         demand = numpy.zeros(len(GOODS))
@@ -134,63 +145,61 @@ class Market(object):
             if len(supply_above_demand) > 0:
                 price_at_demand = supply_above_demand[0]['price']
 #                print "price", good, price_at_demand
-                PRICES[good] = min(price_at_demand, 100.0)
+                self.prices[good] = min(price_at_demand, 100.0)
             else:
                 # demand cannot be met by supply. raise price and try again
-                PRICES[good] = min(PRICES[good] * 1.4 + 3.0, 100.0)  # * HIGH_DEMAND_PRICE_FACTOR
+                self.prices[good] = min(self.prices[good] * 1.4 + 3.0, 100.0)  # * HIGH_DEMAND_PRICE_FACTOR
 #                print "demand not met by supply"
                 demand_met_by_supply = False
 
         if not demand_met_by_supply:
             print "demand not met by supply, trying again"
-            print PRICES
+            print self.prices
             # lower all prices a bit, compensates for some of the prices artificially rising
-            PRICES *= 1.0 / 1.4
+            self.prices *= 1.0 / 1.4
             self.choose_prices()
 
     def trade(self):
         # TODO: move to agent
         for agent in self.agents:
             bought = agent.get_demand()
-            cost = PRICES.dot(bought)
+            cost = self.prices.dot(bought)
             good, _requested_price, amount_sold = agent.get_supply()
             if good is not None:
-                profit = PRICES[good] * amount_sold
+                profit = self.prices[good] * amount_sold
                 agent.magic += profit - cost
                 agent.skills[good] += 0.2
 
-market = Market([Agent() for i in xrange(100)])
 
-skills = numpy.zeros((len(market.agents), len(SPELLS)))
-for i, agent in enumerate(market.agents):
-    skills[i] = agent.skills
-import matplotlib.pyplot as plt
-plt.figure(221)
-plt.hist(skills, 20, label=map(str, SPELLS))
-plt.legend()
-plt.waitforbuttonpress()
+class History(object):
+    def __init__(self, num_agents):
+        self.goods = numpy.zeros((MAX_ROUNDS, len(GOODS)),
+                                 dtype=[('price', 'f4'),
+                                        ('supply', 'f4'),
+                                        ('demand', 'f4')])
+        self.skills = numpy.zeros((MAX_ROUNDS, num_agents, len(SPELLS)),
+                                  dtype=numpy.float32)
 
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
-market.day()
-print PRICES
+    def record_skills(self, iteration, agents):
+        self.skills[iteration] = [agent.skills for agent in agents]
 
-skills = numpy.zeros((len(market.agents), len(SPELLS)))
-for i, agent in enumerate(market.agents):
-    skills[i] = agent.skills
-plt.figure(222)
-plt.hist(skills, 20, label=map(str, SPELLS))
-plt.legend()
-plt.waitforbuttonpress()
+
+def run():
+    market = Market(100)
+
+    import matplotlib.pyplot as plt
+
+    market.day()
+
+    plt.figure(221)
+    plt.hist(market.history.skills[market.iteration], 20, label=map(str, SPELLS))
+    plt.legend()
+    plt.waitforbuttonpress()
+
+    for _i in xrange(30):
+        market.day()
+
+    plt.figure(222)
+    plt.hist(market.history.skills[market.iteration], 20, label=map(str, SPELLS))
+    plt.legend()
+    plt.waitforbuttonpress()
