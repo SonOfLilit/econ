@@ -5,16 +5,19 @@ MAX_ROUNDS = 1000
 NUM_PRICE_SIMULATIONS = 7
 NUM_TRADE_ROUNDS = 3
 
-GOODS = ["water", "wood", "food"]
-WATER, WOOD, FOOD = xrange(len(GOODS))
+GOODS = ["water", "wood", "stone", "food"]
+WATER, WOOD, STONE, FOOD = xrange(len(GOODS))
 
 COSTS_ONLY_MONEY = numpy.zeros(len(GOODS))
-SPELLS = [(10.0, WATER, 3.0, COSTS_ONLY_MONEY),
-          (8.0, WOOD, 10.0, COSTS_ONLY_MONEY),
-          (1.5, FOOD, 12.0, COSTS_ONLY_MONEY),
-          (5.0, FOOD, 2.0, numpy.array([1.0, 1.0, 0.0])),
-          (7.0, FOOD, 5.0, numpy.array([2.0, 1.0, 0.0])),
-          (20.0, FOOD, 200.0, numpy.array([3.0, 3.0, 0.0]))]
+SPELLS = [(0.0, FOOD, 0.0, COSTS_ONLY_MONEY),
+          (14.0, WATER, 3.0, COSTS_ONLY_MONEY),
+          (5.0, WOOD, 10.0, COSTS_ONLY_MONEY),
+          (5.0, FOOD, 2.0, numpy.array([0.0, 3.0, 0.0, 0.0])),
+          (5.0, FOOD, 2.0, numpy.array([1.0, 1.0, 0.0, 0.0])),
+          (5.0, FOOD, 2.0, numpy.array([3.0, 0.0, 0.0, 0.0])),
+          (1.63, FOOD, 12.0, numpy.array([3.0, 0.0, 1.0, 0.0])),
+          (5.0, STONE, 20.0, numpy.array([5.0, 6.0, 4.0, 0.0])),
+          (20.0, FOOD, 200.0, numpy.array([3.0, 3.0, 0.0, 0.0]))]
 
 INITIAL_SKILLS_LOC = 2.0
 INITIAL_SKILLS_SCALE = 0.8
@@ -22,9 +25,10 @@ INITIAL_PRICES = numpy.ones(len(GOODS))
 
 MINIMUM_PROFIT_COST_RATIO = 1.0 + 0.2
 MINIMUM_PROFIT = 2.0
-HIGH_DEMAND_PRICE_FACTOR = 5
+MAX_PRICE = 100.0
+PRICE_INCREMENT = 1.0
 FOOD_DEMAND = numpy.zeros(len(GOODS))
-FOOD_DEMAND[FOOD] += 1.0
+FOOD_DEMAND[FOOD] += 1.2
 
 
 class Agent(object):
@@ -67,8 +71,8 @@ class Agent(object):
             self_supplied_food = min(produced_amount, formula[FOOD])
             produced_amount -= self_supplied_food
             formula[FOOD] -= self_supplied_food
-        cost = magic_cost + market.prices.dot(formula) - self.magic_regeneration
-        produced_value = market.prices[good] * produced_amount
+        cost = magic_cost + self.market.prices.dot(formula) - self.magic_regeneration
+        produced_value = self.market.prices[good] * produced_amount
         return cost, produced_value
 
     def get_demand(self):
@@ -86,6 +90,10 @@ class Agent(object):
                                   MINIMUM_PROFIT_COST_RATIO * cost)
         return good, requested_price, amount
 
+    @property
+    def occupation(self):
+        return self.todays_spell or -1
+
 
 class Market(object):
     def __init__(self, num_agents):
@@ -101,21 +109,21 @@ class Market(object):
             agent.sleep()
         for _i in xrange(NUM_PRICE_SIMULATIONS):
             self.choose_prices()
-            print "***", self.prices
         supplies, demands, prices = [], [], []
-        # TODO: record all above
         for _i in xrange(NUM_TRADE_ROUNDS):
-            self.choose_prices()
+            supply, demand = self.choose_prices()
+            prices.append(self.prices)
+            supplies.append(supply)
+            demands.append(demand)
             self.trade()
-            print "*", self.prices
         
         self.iteration += 1
-        self.history.record_skills(self.iteration, self.agents)
+        self.history.record(self.iteration, self.agents, prices, supplies, demands)
 
     def choose_prices(self):
         demand_met_by_supply = True
 
-        demand = numpy.zeros(len(GOODS))
+        demands = numpy.zeros(len(GOODS))
         # extra items to ensure we have at least one empty "offer" per good
         offers = numpy.zeros(len(self.agents) + len(GOODS),
                              dtype=[('good', int),
@@ -123,7 +131,7 @@ class Market(object):
                                     ('amount', 'f8')])
         for i, agent in enumerate(self.agents):
             agent.choose_work()
-            demand += agent.get_demand()
+            demands += agent.get_demand()
             supply = agent.get_supply()
             if supply[0] is None:
                 supply = (0, 0, 0)
@@ -138,17 +146,18 @@ class Market(object):
                                numpy.where(numpy.diff(offers['good']) != 0)[0] + 1)
         for good in xrange(len(GOODS)):
             supply_above_demand = \
-                supplies[good][supplies[good]['amount'].cumsum() >= demand[good]]
+                supplies[good][supplies[good]['amount'].cumsum() >= demands[good]]
 #            print good, supplies[good]['amount'].sum(), demand[good]
             # supply_above_demand is an array of the rows in
             # supplies[good] where the condition holds
             if len(supply_above_demand) > 0:
                 price_at_demand = supply_above_demand[0]['price']
 #                print "price", good, price_at_demand
-                self.prices[good] = min(price_at_demand, 100.0)
+                self.change_price(good, price_at_demand)
             else:
                 # demand cannot be met by supply. raise price and try again
-                self.prices[good] = min(self.prices[good] * 1.4 + 3.0, 100.0)  # * HIGH_DEMAND_PRICE_FACTOR
+                self.change_price(good, self.prices[good] + PRICE_INCREMENT)
+#                self.prices[good] = min(self.prices[good] * 1.4 + 3.0, 100.0)  # * HIGH_DEMAND_PRICE_FACTOR
 #                print "demand not met by supply"
                 demand_met_by_supply = False
 
@@ -156,8 +165,16 @@ class Market(object):
             print "demand not met by supply, trying again"
             print self.prices
             # lower all prices a bit, compensates for some of the prices artificially rising
-            self.prices *= 1.0 / 1.4
-            self.choose_prices()
+            self.prices -= 0.5
+            return self.choose_prices()
+
+        return [s['amount'].sum() for s in supplies], demands
+
+    def change_price(self, good, target):
+        target = min(target, MAX_PRICE)
+        current = self.prices[good]
+        increment = PRICE_INCREMENT
+        self.prices[good] = min(current + increment, max(current - increment, target))
 
     def trade(self):
         # TODO: move to agent
@@ -168,7 +185,7 @@ class Market(object):
             if good is not None:
                 profit = self.prices[good] * amount_sold
                 agent.magic += profit - cost
-                agent.skills[good] += 0.2
+                agent.skills[good] = numpy.sqrt(agent.skills[good] ** 2 + 0.05)
 
 
 class History(object):
@@ -179,9 +196,14 @@ class History(object):
                                         ('demand', 'f4')])
         self.skills = numpy.zeros((MAX_ROUNDS, num_agents, len(SPELLS)),
                                   dtype=numpy.float32)
+        self.occupations = numpy.zeros((MAX_ROUNDS, num_agents))
 
-    def record_skills(self, iteration, agents):
+    def record(self, iteration, agents, prices, supplies, demands):
         self.skills[iteration] = [agent.skills for agent in agents]
+        self.occupations[iteration] = [agent.occupation for agent in agents]
+        self.goods[iteration]['price'] = numpy.average(prices, axis=0)
+        self.goods[iteration]['supply'] = numpy.average(supplies, axis=0)
+        self.goods[iteration]['demand'] = numpy.average(demands, axis=0)
 
 
 def run():
@@ -191,15 +213,43 @@ def run():
 
     market.day()
 
-    plt.figure(221)
+    plt.figure()
     plt.hist(market.history.skills[market.iteration], 20, label=map(str, SPELLS))
     plt.legend()
-    plt.waitforbuttonpress()
 
     for _i in xrange(30):
         market.day()
 
-    plt.figure(222)
+    plt.figure()
     plt.hist(market.history.skills[market.iteration], 20, label=map(str, SPELLS))
     plt.legend()
-    plt.waitforbuttonpress()
+
+    plt.figure()
+    for i in xrange(len(GOODS)):
+        plt.plot(market.history.goods[:market.iteration + 1, i]['price'],
+                 label=GOODS[i] + " p")
+    plt.legend()
+
+    plt.figure()
+    for i in xrange(len(GOODS)):
+        plt.plot(market.history.goods[:market.iteration + 1, i]['supply'] / 5.0,
+                 label=GOODS[i] + " s")
+        plt.plot(market.history.goods[:market.iteration + 1, i]['demand'],
+                 label=GOODS[i] + " d")
+    plt.legend()
+
+    plt.figure()
+    for spell in xrange(-1, len(SPELLS)):
+        label = ""
+        if spell >= 0:
+            label = str(SPELLS[spell])
+        plt.plot(xrange(market.iteration),
+                 [(market.history.occupations[i] == spell).sum()
+                  for i in xrange(market.iteration)], label=label)
+        plt.legend()
+
+    print market.prices
+    plt.show()
+    #plt.waitforbuttonpress()
+
+run()
