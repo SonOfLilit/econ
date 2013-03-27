@@ -10,14 +10,15 @@ WATER, WOOD, STONE, FOOD = xrange(len(GOODS))
 
 COSTS_ONLY_MONEY = numpy.zeros(len(GOODS))
 SPELLS = [(0.0, FOOD, 0.0, COSTS_ONLY_MONEY),
-          (14.0, WATER, 3.0, COSTS_ONLY_MONEY),
-          (5.0, WOOD, 10.0, COSTS_ONLY_MONEY),
+          (1.0, WATER, 3.0, COSTS_ONLY_MONEY),
+          (6.0, WOOD, 10.0, COSTS_ONLY_MONEY),
           (5.0, FOOD, 2.0, numpy.array([0.0, 3.0, 0.0, 0.0])),
           (5.0, FOOD, 2.0, numpy.array([1.0, 1.0, 0.0, 0.0])),
-          (5.0, FOOD, 2.0, numpy.array([3.0, 0.0, 0.0, 0.0])),
-          (1.63, FOOD, 12.0, numpy.array([3.0, 0.0, 1.0, 0.0])),
+          (3.0, FOOD, 2.0, numpy.array([3.0, 0.0, 0.0, 0.0])),
+          (4.0, FOOD, 12.0, numpy.array([3.0, 0.0, 1.0, 0.0])),
           (5.0, STONE, 20.0, numpy.array([5.0, 6.0, 4.0, 0.0])),
-          (20.0, FOOD, 200.0, numpy.array([3.0, 3.0, 0.0, 0.0]))]
+          (7.0, WATER, 5.0, numpy.array([0.0, 1.0, 0.3, 0.0])),
+          (30.0, FOOD, 200.0, numpy.array([3.0, 3.0, 0.0, 0.0]))]
 
 INITIAL_SKILLS_LOC = 2.0
 INITIAL_SKILLS_SCALE = 0.8
@@ -145,27 +146,29 @@ class Market(object):
         supplies = numpy.split(offers,
                                numpy.where(numpy.diff(offers['good']) != 0)[0] + 1)
         for good in xrange(len(GOODS)):
-            supply_above_demand = \
-                supplies[good][supplies[good]['amount'].cumsum() >= demands[good]]
+            is_supply_above_demand = \
+                len(supplies[good][supplies[good]['amount'].cumsum() >= demands[good]]) > 0
 #            print good, supplies[good]['amount'].sum(), demand[good]
             # supply_above_demand is an array of the rows in
             # supplies[good] where the condition holds
-            if len(supply_above_demand) > 0:
-                price_at_demand = supply_above_demand[0]['price']
+            if is_supply_above_demand:
+                supply_up_to_demand = supplies[good][supplies[good]['amount'].cumsum() <= demands[good]]
+                price_at_demand = numpy.average(supply_up_to_demand['price'])
 #                print "price", good, price_at_demand
                 self.change_price(good, price_at_demand)
             else:
                 # demand cannot be met by supply. raise price and try again
+
+                # lower all prices a bit, compensates for some of the prices artificially rising
+                self.prices /= 1.2
                 self.change_price(good, self.prices[good] + PRICE_INCREMENT)
 #                self.prices[good] = min(self.prices[good] * 1.4 + 3.0, 100.0)  # * HIGH_DEMAND_PRICE_FACTOR
 #                print "demand not met by supply"
                 demand_met_by_supply = False
 
         if not demand_met_by_supply:
-            print "demand not met by supply, trying again"
-            print self.prices
-            # lower all prices a bit, compensates for some of the prices artificially rising
-            self.prices -= 0.5
+#            print "demand not met by supply, trying again"
+#            print self.prices
             return self.choose_prices()
 
         return [s['amount'].sum() for s in supplies], demands
@@ -218,6 +221,9 @@ def run():
     plt.legend()
 
     for _i in xrange(30):
+        print
+        print market.iteration
+        print
         market.day()
 
     plt.figure()
